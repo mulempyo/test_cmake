@@ -1,5 +1,15 @@
-cmake_minimum_required(VERSION 3.20)
-project(diagnostic_topic_monitor)
+cmake_minimum_required(VERSION 3.5)
+project(dwa_planner_ros)
+
+# Default to C99
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 99)
+endif()
+
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -7,100 +17,191 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
-
-find_package(ament_cmake_python REQUIRED)
-
-find_package(rclpy REQUIRED)
-find_package(diagnostic_msgs REQUIRED)
-find_package(diagnostic_updater REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
-find_package(rclcpp_components REQUIRED)
-find_package(lifecycle_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(diagnostic_updater REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav_2d_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(angles REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system thread)
 
-add_library(topic_frequency_monitor_component SHARED src/topic_frequency_monitor_component.cpp)
-rclcpp_components_register_node(topic_frequency_monitor_component
-  PLUGIN "diagnostic_topic_monitor::TopicFrequencyMonitor"
-  EXECUTABLE topic_frequency_monitor
+include_directories(
+  include
+  ${Boost_INCLUDE_DIRS}
 )
-target_include_directories(topic_frequency_monitor_component PRIVATE include)
-target_link_libraries(topic_frequency_monitor_component PUBLIC
-  ${diagnostic_msgs_TARGETS}
-  ${lifecycle_msgs_TARGETS}
-  diagnostic_updater::diagnostic_updater
-  rclcpp::rclcpp
-  rclcpp_components::component_manager
-  rclcpp_lifecycle::rclcpp_lifecycle
+
+set(library_name ${PROJECT_NAME})
+
+set(dependencies
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav2_util
+  nav2_costmap_2d
+  nav_2d_msgs
+  tf2
+  tf2_geometry_msgs
+  tf2_ros
+  geometry_msgs
+  nav_msgs
+  pluginlib
+  geometry_msgs
+  nav_msgs
+  angles
+  Boost
 )
-if(WIN32)
-  target_link_libraries(topic_frequency_monitor_component PRIVATE ws2_32)
-endif()
-ament_export_targets(export_topic_frequency_monitor_component)
-install(TARGETS topic_frequency_monitor_component
-  EXPORT export_topic_frequency_monitor_component
+
+add_library(dwa_planner_ros SHARED
+  src/dwa_planner_ros.cpp
+)
+
+target_link_libraries(${library_name}
+   ${Boost_LIBRARIES}
+)
+  
+ament_target_dependencies(${library_name}
+  ${dependencies}
+)
+
+target_compile_definitions(${library_name} PUBLIC "DWA_PLANNER_BUILDING_LIBRARY")
+
+pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+
+install(TARGETS ${library_name}
+  EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
 
-add_library(topic_age_monitor_component SHARED src/topic_age_monitor_component.cpp)
-rclcpp_components_register_node(topic_age_monitor_component
-  PLUGIN "diagnostic_topic_monitor::TopicAgeMonitor"
-  EXECUTABLE topic_age_monitor
-)
-target_include_directories(topic_age_monitor_component PRIVATE include)
-target_link_libraries(topic_age_monitor_component PUBLIC
-  ${diagnostic_msgs_TARGETS}
-  ${lifecycle_msgs_TARGETS}
-  diagnostic_updater::diagnostic_updater
-  rclcpp::rclcpp
-  rclcpp_components::component_manager
-  rclcpp_lifecycle::rclcpp_lifecycle
-)
-if(WIN32)
-  target_link_libraries(topic_age_monitor_component PRIVATE ws2_32)
-endif()
-ament_export_targets(export_topic_age_monitor_component)
-install(TARGETS topic_age_monitor_component
-  EXPORT export_topic_age_monitor_component
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
+install(DIRECTORY include/
+  DESTINATION include/
 )
 
-install(
-  DIRECTORY include/
-  DESTINATION include
+install(FILES plugin.xml
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  find_package(launch_testing_ament_cmake REQUIRED)
-
-  # Install the test configs and dummy publisher used for testing
-  install(
-    DIRECTORY test
-    DESTINATION share/${PROJECT_NAME}/
-  )
-  install(
-    PROGRAMS test/dummy_publishers.py
-    DESTINATION lib/${PROJECT_NAME}
-  )
-
-  add_launch_test(
-    test/test_topic_frequency_monitor.py
-    TARGET test_topic_frequency_monitor
-    TIMEOUT 20)
-
-  add_launch_test(
-    test/test_topic_age_monitor.py
-    TARGET test_topic_age_monitor
-    TIMEOUT 20)
+  set(ament_cmake_copyright_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
 endif()
+
+ament_export_targets(export_${PROJECT_NAME})
+ament_export_include_directories(include)
+ament_export_libraries(${library_name})
+ament_export_dependencies(${dependencies})
+
+ament_package()
+
+cmake_minimum_required(VERSION 3.5)
+project(pid_ros)
+
+# Default to C99
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 99)
+endif()
+
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav_2d_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system thread)
+
+include_directories(
+  include
+  ${Boost_INCLUDE_DIRS}
+)
+
+set(CasADi_INCLUDE_DIRS /usr/local/include)
+set(CasADi_LIBRARIES /usr/local/lib/libcasadi.so)
+set(library_name ${PROJECT_NAME})
+
+set(dependencies
+  rclcpp
+  rclcpp_lifecycle
+  pluginlib
+  nav2_core
+  nav2_util
+  nav2_costmap_2d
+  nav_2d_msgs
+  tf2
+  tf2_geometry_msgs
+  tf2_ros
+  geometry_msgs
+  nav_msgs
+  geometry_msgs
+  nav_msgs
+  Boost
+)
+
+add_library(pid_ros SHARED
+  src/pid_ros.cpp
+)
+
+target_link_libraries(${library_name}
+  ${Boost_LIBRARIES}
+)
+  
+ament_target_dependencies(${library_name}
+  ${dependencies}
+)
+
+target_compile_definitions(${library_name} PUBLIC "PID_PLANNER_BUILDING_LIBRARY")
+
+pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+
+install(TARGETS ${library_name}
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+install(FILES plugin.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  set(ament_cmake_copyright_FOUND TRUE)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_export_targets(export_${PROJECT_NAME})
+ament_export_include_directories(include)
+ament_export_libraries(${library_name})
+ament_export_dependencies(${dependencies})
 
 ament_package()
