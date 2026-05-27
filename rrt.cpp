@@ -1,4 +1,4 @@
-#include "rrt_planner/rrt.h"
+#include "rrt_star_planner/rrt_star.h"
 #include "pluginlib/class_list_macros.hpp"
 #include <nav_msgs/msg/path.hpp>
 #include <vector>
@@ -12,13 +12,13 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point.hpp>
 
-PLUGINLIB_EXPORT_CLASS(rrt::RRTPlanner, nav2_core::GlobalPlanner)
+PLUGINLIB_EXPORT_CLASS(rrt_star::RRTStarPlanner, nav2_core::GlobalPlanner)
 
-namespace rrt {
+namespace rrt_star {
 
-RRTPlanner::RRTPlanner() : initialized_(false), goal_threshold_(0.5), step_size_(0.05) {}
+RRTStarPlanner::RRTStarPlanner() : initialized_(false), goal_threshold_(0.5), step_size_(0.05), max_iterations_(100000), rewire_radius_(0.05) {}
 
-void RRTPlanner::configure(
+void RRTStarPlanner::configure(
          const rclcpp_lifecycle::LifecycleNode::SharedPtr parent,
          std::string name,
          std::shared_ptr<tf2_ros::Buffer> tf,
@@ -38,48 +38,49 @@ void RRTPlanner::configure(
 
   vis_path_pub_ =
   node_->create_publisher<nav_msgs::msg::Path>(
-  "rrt_vis_path",
+  "rrt_star_path",
   rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
 
   tree_pub_ =
   node_->create_publisher<visualization_msgs::msg::Marker>(
-  "rrt_tree", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+  "rrt_star_tree", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
   initialized_ = true;
   }
   
 }
 
-void RRTPlanner::cleanup() {
+void RRTStarPlanner::cleanup() {
     vis_path_pub_.reset();
     tree_pub_.reset();
   RCLCPP_INFO(
-    node_->get_logger(), "CleaningUp plugin %s of type RRTPlanner",
+    node_->get_logger(), "CleaningUp plugin %s of type RRTStarPlanner",
     name_.c_str());
 }
 
-void RRTPlanner::activate() {
+void RRTStarPlanner::activate() {
     vis_path_pub_->on_activate();
     tree_pub_->on_activate();
   RCLCPP_INFO(
-    node_->get_logger(), "Activating plugin %s of type RRTPlanner",
+    node_->get_logger(), "Activating plugin %s of type RRTStarPlanner",
     name_.c_str());
 }
 
-void RRTPlanner::deactivate() {
+void RRTStarPlanner::deactivate() {
     vis_path_pub_->on_deactivate();
     tree_pub_->on_deactivate();
   RCLCPP_INFO(
-    node_->get_logger(), "Deactivating plugin %s of type RRTPlanner",
+    node_->get_logger(), "Deactivating plugin %s of type RRTStarPlanner",
     name_.c_str());
 }
 
-nav_msgs::msg::Path RRTPlanner::createPlan(
+nav_msgs::msg::Path RRTStarPlanner::createPlan(
   const geometry_msgs::msg::PoseStamped& start,
   const geometry_msgs::msg::PoseStamped& goal) {
   boost::mutex::scoped_lock lock(mutex_);
 
   plan.clear();
   tree.clear();
+  costs_.clear();
 
   return_path.header.frame_id = costmap_ros_->getGlobalFrameID();
   return_path.header.stamp = node_->now();
@@ -113,112 +114,132 @@ nav_msgs::msg::Path RRTPlanner::createPlan(
   unsigned int goal_index = goal_y * width_ + goal_x;
 
   tree.emplace_back(start_index, start_index);
-  unsigned int final_node_index = 0;
+  costs_[start_index] = 0.0;
 
-  int i = 0;
-  int max_iterations_ = 100000000;
+  for (int i = 0; i < max_iterations_; ++i) {
+        double random_x, random_y, random_th;
+        createRandomValidPose(random_x, random_y, random_th);
 
-  while (i < max_iterations_) {
-    double random_x, random_y, random_th;
-    createRandomValidPose(random_x, random_y, random_th);
-    unsigned int nearest_index = nearestNode(random_x, random_y);
-    RCLCPP_WARN(node_->get_logger(), "nearest_index: %f", nearest_index);
-    if (nearest_index == -1) {
-      RCLCPP_WARN(node_->get_logger(), "no valid nearest node found");
-      return return_path;
+        unsigned int nearest_index = nearestNode(random_x, random_y);
+        if (nearest_index == std::numeric_limits<unsigned int>::max()) {
+            continue;
+        }
+
+        double nearest_x, nearest_y;
+        costmap_->mapToWorld(nearest_index % width_, nearest_index / width_, nearest_x, nearest_y);
+
+        double new_x, new_y, new_th;
+        createPoseWithinRange(nearest_x, nearest_y, 0.0, random_x, random_y, random_th, step_size_, new_x, new_y, new_th);
+
+        if (isValidPathBetweenPoses(nearest_x, nearest_y, 0.0, new_x, new_y, 0.0)) {
+            unsigned int new_x_int, new_y_int, new_index, cost;
+
+            if(isValidPose(new_x,new_y)){
+             costmap_->worldToMap(new_x, new_y, new_x_int, new_y_int);
+             cost = costmap_->getCost(new_x_int, new_y_int);
+             new_index = new_y_int * width_ + new_x_int;
+            }
+
+            if (costs_.find(new_index) == costs_.end()) {
+                tree.emplace_back(new_index, nearest_index);
+                costs_[new_index] = costs_[nearest_index] + distance(nearest_x, nearest_y, new_x, new_y);
+
+                rewire(new_index);
+
+                if (isValidPathBetweenPoses(new_x, new_y, 0.0, goal.pose.position.x, goal.pose.position.y, goal_yaw)) {
+                    tree.emplace_back(goal_index, new_index);
+                    costs_[goal_index] = costs_[new_index] + distance(new_x, new_y, goal.pose.position.x, goal.pose.position.y);
+                    break;
+                }
+            }
+        }
+     visualizeTree();
     }
 
-    double nearest_x, nearest_y;
-    costmap_->mapToWorld(nearest_index % width_, nearest_index / width_, nearest_x, nearest_y);
-
-    double th, new_x, new_y, new_th;
-    createPoseWithinRange(nearest_x, nearest_y, th,
-                          random_x, random_y, random_th, step_size_,
-                          new_x, new_y, new_th);
-
-    if (isValidPathBetweenPoses(nearest_x, nearest_y, th, new_x, new_y, new_th)) {
-      unsigned int new_x_int, new_y_int, new_index;
-      costmap_->worldToMap(new_x, new_y, new_x_int, new_y_int);
-      new_index = new_y_int * width_ + new_x_int;
-      RCLCPP_WARN(node_->get_logger(), "new index:%f", new_index);
-      if (new_index != nearest_index && std::find_if(tree.begin(), tree.end(),
-          [new_index](const std::pair<unsigned int, unsigned int>& node) {
-            return node.first == new_index;
-          }) == tree.end()) {
-        tree.emplace_back(new_index, nearest_index);
-      } else {
-        RCLCPP_WARN(node_->get_logger(), "skipping invalid or duplicate node: %d", new_index);
-        continue;
-      }
-
-      if (isValidPathBetweenPoses(new_x, new_y, 0, goal.pose.position.x, goal.pose.position.y, goal_yaw)) {
-        final_node_index = goal_index;
-        tree.emplace_back(goal_index, new_index);
-        break; 
-      }
-    }
-    i++;
-    visualizeTree();
-  }
-
-  RCLCPP_WARN(node_->get_logger(), "tree_size: %d", tree.size());
-
-  if (final_node_index == 0) {
-    RCLCPP_WARN(node_->get_logger(), "final_node_index == 0, failed to find a valid path");
+    return_path = constructPath(start_index, goal_index, plan);
+    vis_path_pub_->publish(return_path);
     return return_path;
-  }
-
-  if (final_node_index != 0) {
-  unsigned int current_index = final_node_index;
-  double wx, wy;
-  unsigned int mx, my;
-  mx = current_index % width_;
-  my = current_index / width_;
-  costmap_->mapToWorld(mx, my, wx, wy);
-
-  while (current_index != start_index) {
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = costmap_ros_->getGlobalFrameID();
-    pose.header.stamp = node_->get_clock()->now();
-    pose.pose.position.x = wx;
-    pose.pose.position.y = wy;
-    pose.pose.position.z = 0;
-    pose.pose.orientation = tf2::toMsg(tf2::Quaternion(0, 0, 0, 1));
-    plan.push_back(pose);
-
-    auto it = std::find_if(tree.begin(), tree.end(),
-      [current_index](const std::pair<unsigned int, unsigned int>& node) {
-        return node.first == current_index;
-      });
-
-    if (it == tree.end()) {
-      RCLCPP_WARN(node_->get_logger(), "failed to find next node for current_index:%d", current_index);
-      break;
-    }
-    if (it->first == it->second) {
-      RCLCPP_WARN(node_->get_logger(), "cycle detected in tree at index:%d", it->first);
-      break;
-    }
-
-    RCLCPP_INFO(node_->get_logger(), "current_index:%d, next_index:%d", current_index, it->second);
-
-    current_index = it->second;
-    mx = current_index % width_;
-    my = current_index / width_;
-    costmap_->mapToWorld(mx, my, wx, wy);
-  }
-
-  std::reverse(plan.begin(), plan.end());
-  RCLCPP_WARN(node_->get_logger(), "plan size: %d", plan.size());
-  plan = smoothPath(plan);
- 
-  return_path = publishPlan(plan);
-  vis_path_pub_->publish(return_path);
-  return return_path;
-  }
 }
 
-double RRTPlanner::footprintCost(double x, double y, double th) const {
+void RRTStarPlanner::rewire(unsigned int& new_index) {
+    double new_x, new_y;
+    costmap_->mapToWorld(new_index % width_, new_index / width_, new_x, new_y);
+
+    unsigned int closest_neighbor = new_index;
+    double min_cost = std::numeric_limits<double>::max();
+
+    for (const auto& node : tree) {
+        unsigned int neighbor_index = node.first;
+        if (neighbor_index == new_index) continue;
+
+        double neighbor_x, neighbor_y;
+        costmap_->mapToWorld(neighbor_index % width_, neighbor_index / width_, neighbor_x, neighbor_y);
+
+        if (distance(new_x, new_y, neighbor_x, neighbor_y) <= rewire_radius_ && isValidPose(new_x, new_y) && isValidPose(neighbor_x, neighbor_y)
+            && isWithinMapBounds(new_x, new_y) && isWithinMapBounds(neighbor_x, neighbor_y)) {
+            double potential_cost = costs_[new_index] + distance(new_x, new_y, neighbor_x, neighbor_y);
+
+            double obstacle_cost = footprintCost(neighbor_x, neighbor_y, 0.0);
+            potential_cost += obstacle_cost * 1.0; 
+
+            if (potential_cost < costs_[neighbor_index] && isValidPathBetweenPoses(new_x, new_y, 0.0, neighbor_x, neighbor_y, 0.0)) {
+                costs_[neighbor_index] = potential_cost;
+
+                auto it = std::find_if(tree.begin(), tree.end(),
+                    [neighbor_index](const std::pair<unsigned int, unsigned int>& node) {
+                        return node.first == neighbor_index;
+                    });
+
+                if (it != tree.end()) {
+                    it->second = new_index;
+                }
+            }
+        }
+    }
+
+}
+
+nav_msgs::msg::Path RRTStarPlanner::constructPath(unsigned int start_index, unsigned int goal_index, std::vector<geometry_msgs::msg::PoseStamped>& plan) {
+    if (costs_.find(goal_index) == costs_.end()) {
+        RCLCPP_WARN(node_->get_logger(),"No valid path found to goal.");
+    }
+
+    unsigned int current_index = goal_index;
+    while (current_index != start_index) {
+        double wx, wy;
+        costmap_->mapToWorld(current_index % width_, current_index / width_, wx, wy);
+
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header.frame_id = costmap_ros_->getGlobalFrameID();
+        pose.header.stamp = node_->now();
+        pose.pose.position.x = wx;
+        pose.pose.position.y = wy;
+        pose.pose.orientation = tf2::toMsg(tf2::Quaternion(0, 0, 0, 1));
+        plan.push_back(pose);
+
+        auto it = std::find_if(tree.begin(), tree.end(), [current_index](const std::pair<unsigned int, unsigned int>& node) {
+            return node.first == current_index;
+        });
+
+        if (it == tree.end()) {
+            RCLCPP_WARN(node_->get_logger(),"Failed to backtrack path.");
+        }
+
+        current_index = it->second;
+    }
+
+    std::reverse(plan.begin(), plan.end());
+    plan = smoothPath(plan);
+    
+    nav_msgs::msg::Path construct_path;
+    construct_path.header.frame_id = costmap_ros_->getGlobalFrameID();
+    construct_path.header.stamp = node_->now();
+
+    construct_path = publishPlan(plan);
+    return construct_path;
+}
+
+double RRTStarPlanner::footprintCost(double x, double y, double th) const {
   if (!initialized_) {
     RCLCPP_WARN(node_->get_logger(),"The RRT Planner has not been initialized, you must call initialize().");
     return -1.0;
@@ -233,7 +254,7 @@ double RRTPlanner::footprintCost(double x, double y, double th) const {
   return footprint_cost;
 }
 
-bool RRTPlanner::isValidPose(double x, double y, double th) const {
+bool RRTStarPlanner::isValidPose(double x, double y, double th) const {
   double footprint_cost = footprintCost(x, y, th);
 
   if ((footprint_cost < 0) || (footprint_cost > 128)) {
@@ -243,7 +264,7 @@ bool RRTPlanner::isValidPose(double x, double y, double th) const {
   return true;
 }
 
-bool RRTPlanner::isValidPose(double x, double y) const {
+bool RRTStarPlanner::isValidPose(double x, double y) const {
   unsigned int mx, my, cost = 0;
   if (costmap_->worldToMap(x, y, mx, my)) {
     for (int dx = -3; dx <= 3; ++dx) {
@@ -264,7 +285,7 @@ bool RRTPlanner::isValidPose(double x, double y) const {
   }
 }
 
-void RRTPlanner::createRandomValidPose(double &x, double &y, double &th) const {
+void RRTStarPlanner::createRandomValidPose(double &x, double &y, double &th) const {
   double wx_min, wy_min;
   costmap_->mapToWorld(0, 0, wx_min, wy_min);
 
@@ -303,28 +324,64 @@ void RRTPlanner::createRandomValidPose(double &x, double &y, double &th) const {
 
 }
 
-unsigned int RRTPlanner::nearestNode(double random_x, double random_y) {
-  unsigned int nearest_index = 0;
-  double min_dist = std::numeric_limits<double>::max();
+unsigned int RRTStarPlanner::nearestNode(double random_x, double random_y) {
+  unsigned int global_nearest_index = 0;
+    double global_min_dist = std::numeric_limits<double>::max();
 
-  for (const auto &node : tree) {
-    unsigned int node_index = node.first;
-    double node_x, node_y;
-    costmap_->mapToWorld(node_index % width_, node_index / width_, node_x, node_y);
-    double dist = distance(node_x, node_y, random_x, random_y);
+    std::vector<std::pair<unsigned int, double>> candidates;
 
-    if (dist < min_dist && dist > 0.001){
-        if(isValidPose(node_x, node_y) && isWithinMapBounds(node_x, node_y)) {
-        min_dist = dist;
-        nearest_index = node_index;
-      }
+    for (const auto& node : tree) {
+        unsigned int node_index = node.first;
+
+        double node_x, node_y;
+        costmap_->mapToWorld(node_index % width_, node_index / width_, node_x, node_y);
+
+        double dist = distance(node_x, node_y, random_x, random_y);
+
+        if (dist < global_min_dist && dist > 0.001) {
+            if (isValidPose(node_x, node_y) && isWithinMapBounds(node_x, node_y)) {
+                global_min_dist = dist;
+                global_nearest_index = node_index;
+            }
+        }
+
+        if (dist <= rewire_radius_ && dist > 0.001) {
+            
+            if (isValidPose(node_x, node_y) && isValidPose(random_x, random_y) &&
+                isWithinMapBounds(node_x, node_y) && isWithinMapBounds(random_x, random_y)) {
+                
+                candidates.emplace_back(node_index, dist);
+            }
+        }
     }
-  }
 
-  return nearest_index;
+    if (candidates.empty()) {
+        return global_nearest_index;
+    }
+
+    unsigned int best_index = 0;
+    double best_cost = std::numeric_limits<double>::max();
+    double best_dist = std::numeric_limits<double>::max();
+
+    for (const auto& c : candidates) {
+        unsigned int cand_index = c.first;
+        double cand_dist = c.second;
+
+        double cand_cost = costs_[cand_index];
+
+        if ((cand_cost < best_cost) ||
+            (std::fabs(cand_cost - best_cost) < 1e-9 && cand_dist < best_dist))
+        {
+            best_cost = cand_cost;
+            best_dist = cand_dist;
+            best_index = cand_index;
+        }
+    }
+
+    return best_index;
 }
 
-void RRTPlanner::createPoseWithinRange(double start_x, double start_y, double start_th,
+void RRTStarPlanner::createPoseWithinRange(double start_x, double start_y, double start_th,
                                        double end_x, double end_y, double end_th,
                                        double range, double &new_x, double &new_y, double &new_th) const { //world
 
@@ -355,7 +412,7 @@ void RRTPlanner::createPoseWithinRange(double start_x, double start_y, double st
   }
 }
 
-bool RRTPlanner::isValidPathBetweenPoses(double x1, double y1, double th1,
+bool RRTStarPlanner::isValidPathBetweenPoses(double x1, double y1, double th1,
                                          double x2, double y2, double th2) const {
   double interp_step_size = 0.05; 
   double current_step = interp_step_size;
@@ -375,7 +432,7 @@ bool RRTPlanner::isValidPathBetweenPoses(double x1, double y1, double th1,
   return true;
 }
 
-bool RRTPlanner::isWithinMapBounds(double x, double y) const {
+bool RRTStarPlanner::isWithinMapBounds(double x, double y) const {
     unsigned int mx, my;
     if (!costmap_->worldToMap(x, y, mx, my)) {
         return false;
@@ -383,9 +440,9 @@ bool RRTPlanner::isWithinMapBounds(double x, double y) const {
     return true;
 }
 
-void RRTPlanner::visualizeTree() const {
+void RRTStarPlanner::visualizeTree() const {
   if (!initialized_) {
-    RCLCPP_WARN(node_->get_logger(), "RRTPlanner not initialized");
+    RCLCPP_WARN(node_->get_logger(), "RRTStarPlanner not initialized");
     return;
   }
 
@@ -434,7 +491,7 @@ void RRTPlanner::visualizeTree() const {
 }
 
 
-nav_msgs::msg::Path RRTPlanner::publishPlan(const std::vector<geometry_msgs::msg::PoseStamped> &path) const {
+nav_msgs::msg::Path RRTStarPlanner::publishPlan(const std::vector<geometry_msgs::msg::PoseStamped> &path) const {
 
   nav_msgs::msg::Path path_msg;
   path_msg.poses.resize(path.size());
@@ -453,7 +510,7 @@ nav_msgs::msg::Path RRTPlanner::publishPlan(const std::vector<geometry_msgs::msg
   return path_msg;
 }
 
-std::vector<geometry_msgs::msg::PoseStamped> RRTPlanner::smoothPath(
+std::vector<geometry_msgs::msg::PoseStamped> RRTStarPlanner::smoothPath(
     const std::vector<geometry_msgs::msg::PoseStamped>& path_in) const 
 {
   if (path_in.size() <= 2) {
@@ -487,15 +544,15 @@ std::vector<geometry_msgs::msg::PoseStamped> RRTPlanner::smoothPath(
 }
 
 
-double RRTPlanner::distance(double x1, double y1, double x2, double y2) {
+double RRTStarPlanner::distance(double x1, double y1, double x2, double y2) {
   return std::hypot(x2 - x1, y2 - y1);
 }
 
-void RRTPlanner::mapToWorld(unsigned int mx, unsigned int my, double &wx, double &wy) {
+void RRTStarPlanner::mapToWorld(unsigned int mx, unsigned int my, double &wx, double &wy) {
   wx = origin_x_ + mx * resolution_;
   wy = origin_y_ + my * resolution_;
 }
 
-}; // namespace rrt
+} // namespace rrt_star
 
     
