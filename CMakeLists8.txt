@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(dwa_planner_ros)
+project(irrt_star_planner)
 
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
@@ -19,91 +19,103 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(pluginlib REQUIRED)
 find_package(nav2_core REQUIRED)
-find_package(nav2_costmap_2d REQUIRED)
-find_package(nav_2d_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(nav2_util REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(angles REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(pluginlib REQUIRED)
+find_package(astar_planner REQUIRED)
 
 include_directories(
   include
+  ${astar_planner_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
 )
 
-set(library_name ${PROJECT_NAME})
+set(library_name ${PROJECT_NAME}_plugin)
+
 
 set(dependencies
   rclcpp
   rclcpp_lifecycle
   nav2_core
-  nav2_util
   nav2_costmap_2d
-  nav_2d_msgs
-  tf2
-  tf2_geometry_msgs
-  tf2_ros
   geometry_msgs
   nav_msgs
   pluginlib
-  geometry_msgs
-  nav_msgs
-  angles
+  tf2
+  tf2_ros
+  visualization_msgs
   Boost
 )
 
-add_library(dwa_planner_ros SHARED
-  src/dwa_planner_ros.cpp
+# Plugin library
+add_library(irrt_star_planner_plugin SHARED
+  src/irrt_star.cpp
 )
 
-target_link_libraries(${library_name}
-   ${Boost_LIBRARIES}
+target_link_libraries(irrt_star_planner_plugin
+  ${astar_planner_LIBRARIES}
+  ${Boost_LIBRARIES}
 )
-  
+
 ament_target_dependencies(${library_name}
   ${dependencies}
 )
 
-target_compile_definitions(${library_name} PUBLIC "DWA_PLANNER_BUILDING_LIBRARY")
+ament_target_dependencies(irrt_star_planner_plugin
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav_msgs
+  geometry_msgs
+  nav2_costmap_2d
+  tf2
+  tf2_ros
+  visualization_msgs
+  Boost
+  pluginlib
+)
 
-pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+target_compile_definitions(irrt_star_planner_plugin PRIVATE "IRRT_STAR_PLANNER_BUILDING_LIBRARY")
 
-install(TARGETS ${library_name}
-  EXPORT export_${PROJECT_NAME}
+# Install
+install(TARGETS irrt_star_planner_plugin
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
-)
-
-install(DIRECTORY include/
-  DESTINATION include/
 )
 
 install(FILES plugin.xml
   DESTINATION share/${PROJECT_NAME}
 )
 
+
+pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_export_targets(export_${PROJECT_NAME})
 ament_export_include_directories(include)
 ament_export_libraries(${library_name})
 ament_export_dependencies(${dependencies})
-
 ament_package()
 
+
+````
+
 cmake_minimum_required(VERSION 3.5)
-project(pid_ros)
+project(rrt_planner)
 
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
@@ -123,85 +135,201 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(pluginlib REQUIRED)
 find_package(nav2_core REQUIRED)
-find_package(nav2_costmap_2d REQUIRED)
-find_package(nav_2d_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(nav2_util REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(pluginlib REQUIRED)
 
 include_directories(
   include
   ${Boost_INCLUDE_DIRS}
 )
 
-set(CasADi_INCLUDE_DIRS /usr/local/include)
-set(CasADi_LIBRARIES /usr/local/lib/libcasadi.so)
-set(library_name ${PROJECT_NAME})
+set(library_name ${PROJECT_NAME}_plugin)
+
 
 set(dependencies
   rclcpp
   rclcpp_lifecycle
-  pluginlib
   nav2_core
-  nav2_util
   nav2_costmap_2d
-  nav_2d_msgs
+  geometry_msgs
+  nav_msgs
+  pluginlib
   tf2
-  tf2_geometry_msgs
   tf2_ros
-  geometry_msgs
-  nav_msgs
-  geometry_msgs
-  nav_msgs
+  visualization_msgs
   Boost
 )
 
-add_library(pid_ros SHARED
-  src/pid_ros.cpp
+# Plugin library
+add_library(rrt_planner_plugin SHARED
+  src/rrt.cpp
 )
 
 target_link_libraries(${library_name}
   ${Boost_LIBRARIES}
 )
-  
+
 ament_target_dependencies(${library_name}
   ${dependencies}
 )
 
-target_compile_definitions(${library_name} PUBLIC "PID_PLANNER_BUILDING_LIBRARY")
+ament_target_dependencies(rrt_planner_plugin
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav_msgs
+  geometry_msgs
+  nav2_costmap_2d
+  tf2
+  tf2_ros
+  visualization_msgs
+  Boost
+  pluginlib
+)
 
-pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+target_compile_definitions(rrt_planner_plugin PRIVATE "RRT_PLANNER_BUILDING_LIBRARY")
 
-install(TARGETS ${library_name}
-  EXPORT export_${PROJECT_NAME}
+# Install
+install(TARGETS rrt_planner_plugin
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
-)
-
-install(DIRECTORY include/
-  DESTINATION include/
 )
 
 install(FILES plugin.xml
   DESTINATION share/${PROJECT_NAME}
 )
 
+pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_export_targets(export_${PROJECT_NAME})
 ament_export_include_directories(include)
 ament_export_libraries(${library_name})
 ament_export_dependencies(${dependencies})
+ament_package()
 
+`````
+
+cmake_minimum_required(VERSION 3.5)
+project(rrt_star_planner)
+
+# Default to C99
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 99)
+endif()
+
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# find dependencies
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(pluginlib REQUIRED)
+
+include_directories(
+  include
+  ${Boost_INCLUDE_DIRS}
+)
+
+set(library_name ${PROJECT_NAME}_plugin)
+
+
+set(dependencies
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav2_costmap_2d
+  geometry_msgs
+  nav_msgs
+  pluginlib
+  tf2
+  tf2_ros
+  visualization_msgs
+  Boost
+)
+
+# Plugin library
+add_library(rrt_star_planner_plugin SHARED
+  src/rrt_star.cpp
+)
+
+target_link_libraries(${library_name}
+  ${Boost_LIBRARIES}
+)
+
+ament_target_dependencies(${library_name}
+  ${dependencies}
+)
+
+ament_target_dependencies(rrt_star_planner_plugin
+  rclcpp
+  rclcpp_lifecycle
+  nav2_core
+  nav_msgs
+  geometry_msgs
+  nav2_costmap_2d
+  tf2
+  tf2_ros
+  visualization_msgs
+  Boost
+  pluginlib
+)
+
+target_compile_definitions(rrt_star_planner_plugin PRIVATE "RRT_STAR_PLANNER_BUILDING_LIBRARY")
+
+# Install
+install(TARGETS rrt_star_planner_plugin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(FILES plugin.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+pluginlib_export_plugin_description_file(nav2_core plugin.xml)
+
+install(DIRECTORY include/
+  DESTINATION include/
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_export_include_directories(include)
+ament_export_libraries(${library_name})
+ament_export_dependencies(${dependencies})
 ament_package()
